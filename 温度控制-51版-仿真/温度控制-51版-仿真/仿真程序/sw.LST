@@ -1,0 +1,408 @@
+C51 COMPILER V9.54   SW                                                                    06/07/2021 17:05:20 PAGE 1   
+
+
+C51 COMPILER V9.54, COMPILATION OF MODULE SW
+OBJECT MODULE PLACED IN sw.OBJ
+COMPILER INVOKED BY: D:\Keil_v5\C51\BIN\C51.EXE sw.c OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECTEXTEND TABS(2)
+
+line level    source
+
+   1          #include <reg52.h> 
+   2          #define uint unsigned int
+   3          #define uchar unsigned char     //宏定义
+   4          #define LCD1602 P0
+   5          sbit SET=P1^0;          //定义调整键
+   6          sbit DEC=P1^1;          //定义减少键
+   7          sbit ADD=P1^2;          //定义增加键
+   8          sbit BUZZ=P2^4;         //定义蜂鸣器
+   9          sbit ALAM=P2^3;         //定义继电器
+  10          sbit ALAM1=P2^2;
+  11          sbit DQ=P2^1;           //定义DS18B20总线I/O  
+  12          sbit RS = P2^5;
+  13          sbit EN = P2^7;
+  14          bit shanshuo_st;          //闪烁间隔标志
+  15          bit beep_st;            //蜂鸣器间隔标志
+  16          uchar x=0;              //计数器
+  17          
+  18          uchar code tab1[]={"Now Tem:   .  C "};
+  19          uchar code tab2[]={"TH:   C  TL:   C"};
+  20          uint c;
+  21          uchar Mode=0;           //状态标志
+  22          signed char TH=40;      //上限报警温度，默认值为40
+  23          signed char TL=10;      //下限报警温度，默认值为10
+  24          //============================================================================================
+  25          //====================================DS18B20=================================================
+  26          //============================================================================================
+  27          /*****延时子程序*****/
+  28          void Delay_DS18B20(int num)
+  29          {
+  30   1        while(num--) ;
+  31   1      }
+  32          void delay(uint xms)//延时函数，有参函数
+  33          {
+  34   1        uint x,y;
+  35   1        for(x=xms;x>0;x--)
+  36   1         for(y=110;y>0;y--);
+  37   1      }
+  38          /*****初始化DS18B20*****/
+  39          void Init_DS18B20(void)
+  40          {
+  41   1        unsigned char x=0;
+  42   1        DQ = 1;         //DQ复位
+  43   1        Delay_DS18B20(8);    //稍做延时
+  44   1        DQ = 0;         //单片机将DQ拉低
+  45   1        Delay_DS18B20(80);   //精确延时，大于480us
+  46   1        DQ = 1;         //拉高总线
+  47   1        Delay_DS18B20(14);
+  48   1        x = DQ;           //稍做延时后，如果x=0则初始化成功，x=1则初始化失败
+  49   1        Delay_DS18B20(20);
+  50   1      }
+  51          /*****读一个字节*****/
+  52          unsigned char ReadOneChar(void)
+  53          {
+  54   1        unsigned char i=0;
+  55   1        unsigned char dat = 0;
+C51 COMPILER V9.54   SW                                                                    06/07/2021 17:05:20 PAGE 2   
+
+  56   1        for (i=8;i>0;i--)
+  57   1        {
+  58   2          DQ = 0;     // 给脉冲信号
+  59   2          dat>>=1;
+  60   2          DQ = 1;     // 给脉冲信号
+  61   2          if(DQ)
+  62   2          dat|=0x80;
+  63   2          Delay_DS18B20(4);
+  64   2        }
+  65   1        return(dat);
+  66   1      }
+  67          /*****写一个字节*****/
+  68          void WriteOneChar(unsigned char dat)
+  69          {
+  70   1        unsigned char i=0;
+  71   1        for (i=8; i>0; i--)
+  72   1        {
+  73   2          DQ = 0;
+  74   2          DQ = dat&0x01;
+  75   2          Delay_DS18B20(5);
+  76   2          DQ = 1;
+  77   2          dat>>=1;
+  78   2        }
+  79   1      }
+  80          /*****读取温度*****/
+  81          unsigned int ReadTemperature(void)
+  82          {
+  83   1        unsigned char a=0;
+  84   1        unsigned char b=0;
+  85   1        unsigned int t=0;
+  86   1        float tt=0;
+  87   1        Init_DS18B20();
+  88   1        WriteOneChar(0xCC);  //跳过读序号列号的操作
+  89   1        WriteOneChar(0x44);  //启动温度转换
+  90   1        Init_DS18B20();
+  91   1        WriteOneChar(0xCC);  //跳过读序号列号的操作
+  92   1        WriteOneChar(0xBE);  //读取温度寄存器
+  93   1        a=ReadOneChar();     //读低8位
+  94   1        b=ReadOneChar();    //读高8位
+  95   1        t=b;
+  96   1        t<<=8;
+  97   1        t=t|a;
+  98   1        tt=t*0.0625;
+  99   1       // t= tt*10+0.5;     //放大10倍输出并四舍五入
+ 100   1        t= tt*10+0.5; 
+ 101   1        return(t);
+ 102   1      }
+ 103          
+ 104          /*****读取温度*****/
+ 105          void check_wendu(void)
+ 106          {
+ 107   1        c=ReadTemperature()-5;        //获取温度值并减去DS18B20的温漂误差
+ 108   1        if(c>1200)
+ 109   1        c=1200;
+ 110   1      }
+ 111          
+ 112          /********液晶写入指令函数与写入数据函数，以后可调用**************/
+ 113          
+ 114          void write_1602com(uchar com)//****液晶写入指令函数****
+ 115          {
+ 116   1        RS=0;//数据/指令选择置为指令
+ 117   1      //  rw=0; //读写选择置为写
+C51 COMPILER V9.54   SW                                                                    06/07/2021 17:05:20 PAGE 3   
+
+ 118   1        LCD1602=com;//送入数据
+ 119   1        delay(1);
+ 120   1        EN=1;//拉高使能端，为制造有效的下降沿做准备
+ 121   1        delay(1);
+ 122   1        EN=0;//en由高变低，产生下降沿，液晶执行命令
+ 123   1      }
+ 124          
+ 125          
+ 126          void write_1602dat(uchar dat)//***液晶写入数据函数****
+ 127          {
+ 128   1        RS=1;//数据/指令选择置为数据
+ 129   1      //  rw=0; //读写选择置为写
+ 130   1        LCD1602=dat;//送入数据
+ 131   1        delay(1);
+ 132   1        EN=1; //en置高电平，为制造下降沿做准备
+ 133   1        delay(1);
+ 134   1        EN=0; //en由高变低，产生下降沿，液晶执行命令
+ 135   1      }
+ 136          
+ 137          
+ 138          void lcd_init()//***液晶初始化函数****
+ 139          {
+ 140   1        uchar a;
+ 141   1        write_1602com(0x38);//设置液晶工作模式，意思：16*2行显示，5*7点阵，8位数据
+ 142   1        write_1602com(0x0c);//开显示不显示光标
+ 143   1        write_1602com(0x06);//整屏不移动，光标自动右移
+ 144   1        write_1602com(0x01);//清显示
+ 145   1      
+ 146   1        write_1602com(0x80);//日历显示固定符号从第一行第1个位置之后开始显示
+ 147   1        for(a=0;a<16;a++)
+ 148   1        {
+ 149   2          write_1602dat(tab1[a]);//向液晶屏写日历显示的固定符号部分
+ 150   2          delay(3);
+ 151   2        }
+ 152   1        write_1602com(0x80+0x40);//时间显示固定符号写入位置，从第2个位置后开始显示
+ 153   1        for(a=0;a<16;a++)
+ 154   1        {
+ 155   2          write_1602dat(tab2[a]);//写显示时间固定符号，两个冒号
+ 156   2          delay(3);
+ 157   2        }
+ 158   1      
+ 159   1      }
+ 160          
+ 161          void display()
+ 162          {
+ 163   1        if(Mode==0)
+ 164   1        {
+ 165   2          write_1602com(0x80+8);
+ 166   2          write_1602dat(c/1000+0x30);
+ 167   2          write_1602dat((c%1000)/100+0x30);
+ 168   2          write_1602dat(((c%1000)%100)/10+0x30);
+ 169   2          write_1602com(0x80+12);
+ 170   2          write_1602dat(((c%1000)%100)%10+0x30);
+ 171   2          write_1602com(0x80+13);
+ 172   2          write_1602dat(0xdf);
+ 173   2          write_1602com(0x80+0x40+3);
+ 174   2          write_1602dat(TH/10+0x30);
+ 175   2          write_1602dat(TH%10+0x30);
+ 176   2          write_1602dat(0xdf);
+ 177   2          write_1602com(0x80+0x40+12);
+ 178   2          write_1602dat(TL/10+0x30);
+ 179   2          write_1602dat(TL%10+0x30);
+C51 COMPILER V9.54   SW                                                                    06/07/2021 17:05:20 PAGE 4   
+
+ 180   2          write_1602dat(0xdf);      
+ 181   2        }                 
+ 182   1      }
+ 183          //=====================================================================================
+ 184          
+ 185          /*****初始化定时器0*****/
+ 186          void InitTimer(void)
+ 187          {
+ 188   1        TMOD=0x1;
+ 189   1        TH0=0x3c;
+ 190   1        TL0=0xb0;     //50ms（晶振12M）
+ 191   1        EA=1;      //全局中断开关
+ 192   1        TR0=1;
+ 193   1        ET0=1;      //开启定时器0
+ 194   1      }
+ 195          
+ 196          void KEY()
+ 197          {
+ 198   1            //功能键
+ 199   1        if(SET==0)
+ 200   1        {
+ 201   2          BUZZ=0;
+ 202   2          delay(10);
+ 203   2          if(SET==0)
+ 204   2          {
+ 205   3            Mode++;
+ 206   3            if(Mode==3)
+ 207   3            Mode=0;
+ 208   3            BUZZ=1;
+ 209   3          }
+ 210   2          while(SET==0)
+ 211   2          {
+ 212   3            if(Mode==0)
+ 213   3              {
+ 214   4              //  write_1602com(0x80+0x40+6);
+ 215   4                write_1602com(0x0c);
+ 216   4              } 
+ 217   3            else if(Mode==1)
+ 218   3              {
+ 219   4                write_1602com(0x80+0x40+4);
+ 220   4                write_1602com(0x0f);
+ 221   4              } 
+ 222   3            else
+ 223   3              {
+ 224   4                write_1602com(0x80+0x40+13);
+ 225   4                write_1602com(0x0f);
+ 226   4              }             
+ 227   3          }
+ 228   2        }
+ 229   1        //增加
+ 230   1        if(ADD==0&&Mode==1)
+ 231   1        {
+ 232   2          BUZZ=0;
+ 233   2          delay(10);
+ 234   2          if(ADD==0)  
+ 235   2          {
+ 236   3            TH++;
+ 237   3            if(TH>=99)  
+ 238   3            TH=99;
+ 239   3            write_1602com(0x80+0x40+3);
+ 240   3            write_1602dat(TH/10+0x30);
+ 241   3            write_1602dat(TH%10+0x30);
+C51 COMPILER V9.54   SW                                                                    06/07/2021 17:05:20 PAGE 5   
+
+ 242   3            write_1602com(0x80+0x40+4); 
+ 243   3            BUZZ=1;
+ 244   3          }
+ 245   2          while(ADD==0);
+ 246   2          
+ 247   2        }
+ 248   1        //减少
+ 249   1        if(DEC==0&&Mode==1)
+ 250   1        {
+ 251   2          BUZZ=0;
+ 252   2          delay(10);
+ 253   2          if(DEC==0)
+ 254   2          {
+ 255   3            TH--;
+ 256   3            if(TH==TL)  
+ 257   3            TH=TL+1;
+ 258   3            write_1602com(0x80+0x40+3);
+ 259   3            write_1602dat(TH/10+0x30);
+ 260   3            write_1602dat(TH%10+0x30);
+ 261   3            write_1602com(0x80+0x40+4); 
+ 262   3            BUZZ=1;
+ 263   3          }
+ 264   2          while(DEC==0);
+ 265   2        }
+ 266   1        if(ADD==0&&Mode==2)
+ 267   1        {
+ 268   2          BUZZ=0;
+ 269   2          delay(10);
+ 270   2          if(ADD==0)  
+ 271   2          {
+ 272   3            TL++;
+ 273   3            if(TL==TH)  
+ 274   3            TL=TH-1;
+ 275   3            write_1602com(0x80+0x40+12);
+ 276   3            write_1602dat(TL/10+0x30);
+ 277   3            write_1602dat(TL%10+0x30);
+ 278   3            write_1602com(0x80+0x40+13);  
+ 279   3            BUZZ=1;
+ 280   3          }
+ 281   2          while(ADD==0);
+ 282   2          
+ 283   2        }
+ 284   1        //减少
+ 285   1        if(DEC==0&&Mode==2)
+ 286   1        {
+ 287   2          BUZZ=0;
+ 288   2          delay(10);
+ 289   2          if(DEC==0)
+ 290   2          {
+ 291   3            TL--;
+ 292   3            if(TL<=0) 
+ 293   3            TL=0;
+ 294   3            write_1602com(0x80+0x40+12);
+ 295   3            write_1602dat(TL/10+0x30);
+ 296   3            write_1602dat(TL%10+0x30);
+ 297   3            write_1602com(0x80+0x40+13);  
+ 298   3            BUZZ=1;
+ 299   3          }
+ 300   2          while(DEC==0);    
+ 301   2        }
+ 302   1      }
+ 303          
+C51 COMPILER V9.54   SW                                                                    06/07/2021 17:05:20 PAGE 6   
+
+ 304          /*****报警子程序*****/
+ 305          void Alarm()
+ 306          {
+ 307   1        if(x>=10){beep_st=~beep_st;x=0;}
+ 308   1        if(Mode==0)
+ 309   1        {
+ 310   2          if((c/10)>=TH)
+ 311   2          {
+ 312   3            ALAM=0;
+ 313   3            ALAM1=1;
+ 314   3            if(beep_st==1)
+ 315   3            BUZZ=0;
+ 316   3            else
+ 317   3            BUZZ=1;
+ 318   3          }
+ 319   2          else if((c/10)<TL)
+ 320   2          {
+ 321   3            ALAM1=0;
+ 322   3            ALAM=1;
+ 323   3            if(beep_st==1)
+ 324   3            BUZZ=0;
+ 325   3            else
+ 326   3            BUZZ=1;
+ 327   3          }
+ 328   2          else
+ 329   2          {
+ 330   3            BUZZ=1;
+ 331   3            ALAM=1;
+ 332   3            ALAM1=1;    
+ 333   3          }
+ 334   2        }
+ 335   1        else
+ 336   1        {
+ 337   2          BUZZ=1;
+ 338   2          ALAM=1;
+ 339   2          ALAM1=1;
+ 340   2        }
+ 341   1      }
+ 342          
+ 343          /*****主函数*****/
+ 344          void main(void)
+ 345          {
+ 346   1        uint z;
+ 347   1        delay(1);
+ 348   1        lcd_init();
+ 349   1        delay(1);
+ 350   1        InitTimer();    //初始化定时器
+ 351   1        
+ 352   1        for(z=0;z<100;z++)
+ 353   1        {
+ 354   2          check_wendu();
+ 355   2          delay(1);        
+ 356   2        } 
+ 357   1        while(1)
+ 358   1        {
+ 359   2          
+ 360   2          display();
+ 361   2          KEY();
+ 362   2          Alarm(); 
+ 363   2          check_wendu();
+ 364   2        }
+ 365   1      }
+C51 COMPILER V9.54   SW                                                                    06/07/2021 17:05:20 PAGE 7   
+
+ 366          
+ 367          /*****定时器0中断服务程序*****/
+ 368          void timer0(void) interrupt 1
+ 369          {
+ 370   1       TH0=0x3c;
+ 371   1       TL0=0xb0;
+ 372   1       x++;
+ 373   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   1055    ----
+   CONSTANT SIZE    =     34    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =      6       6
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      2    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
